@@ -1,0 +1,215 @@
+# SPIRE Server for the trust domain tvm.local.
+#
+# Agents attest their node with a projected ServiceAccount token (k8s_psat).
+# The server publishes its CA bundle into the ConfigMap `spire-bundle` of this
+# namespace, which the agents read; spire/install.sh copies it to `platform`
+# for OpenBao.
+#
+# ca_ttl is one year so the CA does not rotate during the life of a test
+# cluster: OpenBao is given the bundle once at install time and is not updated
+# afterwards.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-server
+  namespace: spire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spire-server
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spire-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spire-server
+subjects:
+  - kind: ServiceAccount
+    name: spire-server
+    namespace: spire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spire-server-bundle
+  namespace: spire
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["spire-bundle"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spire-server-bundle
+  namespace: spire
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spire-server-bundle
+subjects:
+  - kind: ServiceAccount
+    name: spire-server
+    namespace: spire
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-bundle
+  namespace: spire
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-server-config
+  namespace: spire
+data:
+  server.conf: |
+    server {
+        bind_address = "0.0.0.0"
+        bind_port = "8081"
+        trust_domain = "tvm.local"
+        data_dir = "/run/spire/data"
+        log_level = "INFO"
+        default_x509_svid_ttl = "55m"
+        ca_ttl = "8760h"
+        agent_ttl = "8h"
+        ca_subject {
+            organization = ["mcp-tenants"]
+            common_name = "tvm.local"
+        }
+    }
+    health_checks {
+        listener_enabled = true
+        bind_address = "0.0.0.0"
+        bind_port = "8080"
+        live_path = "/live"
+        ready_path = "/ready"
+    }
+    plugins {
+        DataStore "sql" {
+            plugin_data {
+                database_type = "sqlite3"
+                connection_string = "/run/spire/data/datastore.sqlite3"
+            }
+        }
+        NodeAttestor "k8s_psat" {
+            plugin_data {
+                clusters = {
+                    "mcp-tenants" = {
+                        service_account_allow_list = ["spire:spire-agent"]
+                    }
+                }
+            }
+        }
+        KeyManager "disk" {
+            plugin_data {
+                keys_path = "/run/spire/data/keys.json"
+            }
+        }
+        Notifier "k8sbundle" {
+            plugin_data {
+                namespace = "spire"
+                config_map = "spire-bundle"
+                config_map_key = "bundle.crt"
+            }
+        }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-server
+  namespace: spire
+spec:
+  selector:
+    app: spire-server
+  ports:
+    - name: grpc
+      port: 8081
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spire-server
+  namespace: spire
+spec:
+  serviceName: spire-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spire-server
+  template:
+    metadata:
+      labels:
+        app: spire-server
+    spec:
+      serviceAccountName: spire-server
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: spire-server
+          image: ghcr.io/spiffe/spire-server:1.16.0
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/run/spire/config/server.conf"]
+          ports:
+            - name: grpc
+              containerPort: 8081
+            - name: health
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: data
+              mountPath: /run/spire/data
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: spire-server-config
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

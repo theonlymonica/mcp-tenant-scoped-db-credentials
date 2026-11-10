@@ -1,0 +1,47 @@
+# Four namespaces, so that the right to create a pod in one of them is not the
+# right to take another component's identity. SPIRE gives an identity to a pod
+# by its namespace and ServiceAccount: whoever can create pods in a namespace
+# can obtain every identity registered for it.
+#
+#   platform     PostgreSQL, OpenBao, Keycloak, the gateway and the MCP server
+#   interceptor  the Interceptor alone: its identity is the one that can ask
+#                OpenBao for a credential of any tenant
+#   agents       the shared agent alone, so no NetworkPolicy that admits
+#                `platform` pods also admits it
+#   spire        the SPIRE Server and Agents, which need host access
+#
+# Pod Security admission is enforced at `restricted` everywhere but `spire`: a
+# pod there cannot mount a host path, share a host namespace or run as root, so
+# it cannot reach the node, where the keys of every identity are. The workloads
+# get the SPIRE socket from the SPIFFE CSI driver, not from a host path.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform
+  labels:
+    tier: platform
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: interceptor
+  labels:
+    tier: interceptor
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agents
+  labels:
+    tier: agent
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spire
+  labels:
+    tier: identity
+    pod-security.kubernetes.io/enforce: privileged

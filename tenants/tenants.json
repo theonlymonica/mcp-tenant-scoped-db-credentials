@@ -1,0 +1,7 @@
+{
+  "operations": ["read", "search", "append"],
+  "tenants": [
+    {"name": "tenant1", "tools": ["read", "search", "append"]},
+    {"name": "tenant2", "tools": ["read", "search"]}
+  ]
+}

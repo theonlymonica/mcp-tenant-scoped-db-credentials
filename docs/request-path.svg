@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1570" height="800" viewBox="0 60 1570 800">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1E2933"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8C96A1"/></marker></defs>
+<rect x="0" y="0" width="1570" height="860" fill="#FFFFFF"/>
+<rect x="40" y="100" width="200" height="90" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="140.0" y="141.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">Keycloak</text>
+<text x="140.0" y="163.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">OIDC provider</text>
+<rect x="40" y="380" width="200" height="80" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="140.0" y="427.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">User</text>
+<line x1="140" y1="380" x2="140" y2="194" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)" marker-start="url(#ar)"/>
+<text x="150" y="280" text-anchor="start" font-family="Carlito, Liberation Sans, sans-serif" font-size="15" fill="#1E2933">token with</text>
+<text x="150" y="300" text-anchor="start" font-family="Liberation Mono, DejaVu Sans Mono, monospace" font-size="15" fill="#1E2933">scope_group</text>
+<rect x="40" y="595" width="200" height="70" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="140.0" y="626.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">Model provider</text>
+<text x="140.0" y="648.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">OpenAI-compatible API</text>
+<rect x="290" y="330" width="230" height="150" rx="14" fill="#F4F6F8" stroke="#8C96A1" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="304" y="356" font-family="Carlito, Liberation Sans, sans-serif" font-size="17" fill="#8C96A1">Agent pod (kagent)</text>
+<rect x="310" y="385" width="190" height="70" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="405.0" y="416.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">Agent</text>
+<text x="405.0" y="438.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">shared by all tenants</text>
+<line x1="240" y1="420" x2="310" y2="420" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<text x="275" y="410" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="15" fill="#1E2933">prompt</text>
+<rect x="580" y="80" width="390" height="620" rx="14" fill="#F4F6F8" stroke="#8C96A1" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="594" y="106" font-family="Carlito, Liberation Sans, sans-serif" font-size="17" fill="#8C96A1">agentgateway pod</text>
+<rect x="640" y="125" width="285" height="60" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="782.5" y="151.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">JWT authentication</text>
+<text x="782.5" y="173.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">issuer, audience, JWKS</text>
+<rect x="640" y="220" width="285" height="60" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="782.5" y="246.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">Route filter</text>
+<text x="782.5" y="268.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">removes client x-tvm-credential</text>
+<rect x="640" y="315" width="285" height="60" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="782.5" y="341.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">MCP guardrail</text>
+<text x="782.5" y="363.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">tools/call only, FailClosed</text>
+<rect x="640" y="470" width="285" height="60" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="782.5" y="496.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">MCP backend</text>
+<text x="782.5" y="518.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">removes authorization</text>
+<rect x="640" y="600" width="285" height="60" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="782.5" y="626.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">Model route</text>
+<text x="782.5" y="648.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">no tools, no guardrail</text>
+<line x1="782" y1="185" x2="782" y2="220" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<line x1="782" y1="280" x2="782" y2="315" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<line x1="782" y1="375" x2="782" y2="470" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<path d="M640,178 L608,178 L608,615 L640,615" fill="none" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<text x="598" y="420" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="15" fill="#1E2933" transform="rotate(-90 598 420)">model requests</text>
+<path d="M240,135 L640,135" fill="none" stroke="#8C96A1" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<text x="430" y="127" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="15" fill="#8C96A1">signing keys (JWKS)</text>
+<path d="M500,420 L550,420 L550,160 L640,160" fill="none" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<circle cx="550" cy="200" r="15" fill="#0B6E69"/>
+<text x="550" y="206" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#FFFFFF">1</text>
+<text x="541" y="335" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="15" fill="#1E2933" transform="rotate(-90 541 335)">mTLS, agent SVID</text>
+<circle cx="950" cy="155" r="15" fill="#0B6E69"/>
+<text x="950" y="161" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#FFFFFF">2</text>
+<line x1="640" y1="645" x2="240" y2="645" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<text x="425" y="637" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="15" fill="#8C96A1">outside SPIRE</text>
+<rect x="1210" y="190" width="160" height="200" rx="14" fill="#F4F6F8" stroke="#8C96A1" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="1224" y="216" font-family="Carlito, Liberation Sans, sans-serif" font-size="17" fill="#8C96A1">Interceptor pod</text>
+<rect x="1230" y="315" width="125" height="60" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="1292.5" y="341.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#1E2933">Interceptor</text>
+<text x="1292.5" y="363.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">gets wrap token</text>
+<rect x="1230" y="235" width="125" height="50" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="1292.5" y="267.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#1E2933">OPA</text>
+<line x1="1292" y1="315" x2="1292" y2="285" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)" marker-start="url(#ar)"/>
+<line x1="925" y1="345" x2="1230" y2="345" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)" marker-start="url(#ar)"/>
+<text x="1077" y="335" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="14" fill="#1E2933">tools/call</text>
+<text x="1077" y="368" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="14" fill="#1E2933">wrap token</text>
+<text x="1077" y="384" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="14" fill="#1E2933">header</text>
+<circle cx="1077" cy="302" r="15" fill="#0B6E69"/>
+<text x="1077" y="308" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#FFFFFF">3</text>
+<rect x="1400" y="320" width="150" height="50" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="1475.0" y="352.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#1E2933">OpenBao</text>
+<line x1="1355" y1="345" x2="1400" y2="345" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)" marker-start="url(#ar)"/>
+<text x="1475" y="305" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="14" fill="#1E2933">cert auth</text>
+<circle cx="1377" cy="265" r="15" fill="#0B6E69"/>
+<text x="1377" y="271" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#FFFFFF">4</text>
+<rect x="1040" y="430" width="330" height="130" rx="14" fill="#F4F6F8" stroke="#8C96A1" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="1054" y="456" font-family="Carlito, Liberation Sans, sans-serif" font-size="17" fill="#8C96A1">MCP server pod</text>
+<rect x="1060" y="470" width="290" height="60" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="1205.0" y="496.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">MCP server</text>
+<text x="1205.0" y="518.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">read, search, append</text>
+<line x1="925" y1="500" x2="1060" y2="500" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<text x="990" y="490" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="14" fill="#1E2933">mTLS</text>
+<circle cx="990" cy="535" r="15" fill="#0B6E69"/>
+<text x="990" y="541" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="18" font-weight="700" fill="#FFFFFF">5</text>
+<rect x="1400" y="430" width="150" height="170" rx="8" fill="#E6F2F1" stroke="#0B6E69" stroke-width="2.4"/>
+<text x="1475.0" y="489.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">PostgreSQL</text>
+<text x="1475.0" y="511.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">two policies</text>
+<text x="1475.0" y="531.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">per tenant</text>
+<text x="1475.0" y="551.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">short-lived role</text>
+<line x1="1520" y1="370" x2="1520" y2="430" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<text x="1512" y="405" text-anchor="end" font-family="Liberation Mono, DejaVu Sans Mono, monospace" font-size="13" fill="#1E2933">CREATE ROLE</text>
+<line x1="1350" y1="500" x2="1400" y2="500" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<rect x="580" y="740" width="790" height="70" rx="8" fill="#FFFFFF" stroke="#1E2933" stroke-width="1.6"/>
+<text x="975.0" y="771.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="20" font-weight="700" fill="#1E2933">SPIRE</text>
+<text x="975.0" y="793.0" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="16" fill="#1E2933">gives an SVID to the agent, the gateway, the Interceptor and the MCP server</text>
+<path d="M580,775 L270,775 L270,440 L310,440" fill="none" stroke="#8C96A1" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<line x1="775" y1="740" x2="775" y2="704" stroke="#8C96A1" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<line x1="1205" y1="740" x2="1205" y2="564" stroke="#8C96A1" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<path d="M1370,775 L1560,775 L1560,215 L1370,215" fill="none" stroke="#8C96A1" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<path d="M1335,470 L1335,416 L1412,416 L1412,374" fill="none" stroke="#1E2933" stroke-width="1.8" marker-end="url(#ar)"/>
+<text x="1373" y="410" text-anchor="middle" font-family="Carlito, Liberation Sans, sans-serif" font-size="14" fill="#1E2933">unwrap</text>
+</svg>

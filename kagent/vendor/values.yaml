@@ -1,0 +1,25 @@
+# Values used to render vendor/kagent-controller-0.10.2.yaml: the controller only,
+# no bundled agents and no UI. In trusted-proxy mode the controller forwards the
+# caller's Authorization header to the agent.
+controller:
+  auth:
+    mode: trusted-proxy
+providers:
+  default: ollama
+ui:
+  enabled: false
+kmcp:
+  enabled: false
+k8s-agent: {enabled: false}
+kgateway-agent: {enabled: false}
+istio-agent: {enabled: false}
+promql-agent: {enabled: false}
+observability-agent: {enabled: false}
+argo-rollouts-agent: {enabled: false}
+helm-agent: {enabled: false}
+cilium-policy-agent: {enabled: false}
+cilium-manager-agent: {enabled: false}
+cilium-debug-agent: {enabled: false}
+grafana-mcp: {enabled: false}
+kagent-tools: {enabled: false}
+querydoc: {enabled: false}

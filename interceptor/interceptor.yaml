@@ -1,0 +1,217 @@
+# The Interceptor, alone in its namespace: its identity is the one OpenBao
+# gives credentials to, so nothing else is allowed to run next to it.
+#
+# The pod has three containers.
+#   envoy        terminates mutual TLS on :9002 with the Interceptor's SVID and
+#                admits only the gateway's SPIFFE ID;
+#   interceptor  the ExtMCP service, on 127.0.0.1:9003;
+#   opa          the tool policy, on 127.0.0.1:8181.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: interceptor
+  namespace: interceptor
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: interceptor-envoy
+  namespace: interceptor
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: {address: 127.0.0.1, port_value: 9902}
+    static_resources:
+      clusters:
+        - name: spire_agent
+          type: STATIC
+          connect_timeout: 1s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config: {http2_protocol_options: {}}
+          load_assignment:
+            cluster_name: spire_agent
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        pipe: {path: /run/spire/sockets/agent.sock}
+        - name: interceptor
+          type: STATIC
+          connect_timeout: 1s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config: {http2_protocol_options: {}}
+          load_assignment:
+            cluster_name: interceptor
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: {address: 127.0.0.1, port_value: 9003}
+      listeners:
+        - name: inbound
+          address:
+            socket_address: {address: 0.0.0.0, port_value: 9002}
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: inbound
+                    codec_type: HTTP2
+                    route_config:
+                      virtual_hosts:
+                        - name: interceptor
+                          domains: ["*"]
+                          routes:
+                            - match: {prefix: "/"}
+                              route: {cluster: interceptor, timeout: 0s}
+                    http_filters:
+                      # Only the ExtMCP service, and only for the gateway.
+                      - name: envoy.filters.http.rbac
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                          rules:
+                            action: ALLOW
+                            policies:
+                              gateway:
+                                permissions:
+                                  - url_path:
+                                      path: {prefix: "/agentgateway.dev.ext_mcp.ExtMcp/"}
+                                principals:
+                                  - authenticated:
+                                      principal_name: {exact: "spiffe://tvm.local/platform/mcp-gateway"}
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+              transport_socket:
+                name: envoy.transport_sockets.tls
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+                  require_client_certificate: true
+                  common_tls_context:
+                    alpn_protocols: ["h2"]
+                    tls_certificate_sds_secret_configs:
+                      - name: default
+                        sds_config:
+                          resource_api_version: V3
+                          api_config_source:
+                            api_type: GRPC
+                            transport_api_version: V3
+                            grpc_services: [{envoy_grpc: {cluster_name: spire_agent}}]
+                    combined_validation_context:
+                      default_validation_context:
+                        match_typed_subject_alt_names:
+                          - san_type: URI
+                            matcher: {exact: "spiffe://tvm.local/platform/mcp-gateway"}
+                      validation_context_sds_secret_config:
+                        name: ROOTCA
+                        sds_config:
+                          resource_api_version: V3
+                          api_config_source:
+                            api_type: GRPC
+                            transport_api_version: V3
+                            grpc_services: [{envoy_grpc: {cluster_name: spire_agent}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interceptor
+  namespace: interceptor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interceptor
+  template:
+    metadata:
+      labels:
+        app: interceptor
+    spec:
+      serviceAccountName: interceptor
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: envoy
+          image: envoyproxy/envoy:distroless-v1.40.2
+          imagePullPolicy: IfNotPresent
+          args: ["--config-path", "/etc/envoy/envoy.yaml", "--service-node", "interceptor",
+                 "--service-cluster", "interceptor"]
+          ports:
+            - name: ext-mcp
+              containerPort: 9002
+          readinessProbe:
+            tcpSocket:
+              port: 9002
+          securityContext:
+            runAsUser: 10101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: envoy-config, mountPath: /etc/envoy, readOnly: true}
+            - {name: spire-socket, mountPath: /run/spire/sockets, readOnly: true}
+        - name: interceptor
+          image: interceptor:1.0.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 10002
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: spire-socket, mountPath: /run/spire/sockets, readOnly: true}
+            - {name: platform-ca, mountPath: /platform-ca, readOnly: true}
+            - {name: svid, mountPath: /run/interceptor}
+        - name: opa
+          image: openpolicyagent/opa:1.22.2-static
+          imagePullPolicy: IfNotPresent
+          args: ["run", "--server", "--addr=127.0.0.1:8181", "--skip-version-check", "/policy/policy.rego"]
+          securityContext:
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: opa-policy, mountPath: /policy, readOnly: true}
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: interceptor-envoy
+        - name: opa-policy
+          configMap:
+            name: opa-policy
+        - name: platform-ca
+          configMap:
+            name: platform-ca
+        - name: spire-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: svid
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: interceptor
+  namespace: interceptor
+spec:
+  selector:
+    app: interceptor
+  ports:
+    - name: ext-mcp
+      port: 9002

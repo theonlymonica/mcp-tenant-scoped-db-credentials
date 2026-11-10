@@ -1,0 +1,8 @@
+mcp==2.3.0
+uvicorn==0.54.0
+starlette==1.10.0
+anyio==4.16.0
+spiffe==0.4.0
+cryptography==50.0.2
+psycopg==3.3.8
+psycopg-binary==3.3.8

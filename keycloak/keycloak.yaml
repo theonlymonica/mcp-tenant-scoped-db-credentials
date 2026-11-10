@@ -1,0 +1,113 @@
+# Keycloak authenticates the users. The realm `tvm` puts each user's tenant in
+# the `scope_group` claim and the MCP endpoint in the token audience.
+#
+# The issuer is the HTTP address, which is what Agentgateway fetches the keys
+# from. The Interceptor fetches the same keys over HTTPS (port 8443).
+# start-dev keeps the realm in an in-memory database, re-imported at every start.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: platform
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      port: 8080
+    - name: https
+      port: 8443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.8.2
+          imagePullPolicy: IfNotPresent
+          args: ["start-dev", "--import-realm"]
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: admin-password
+            - name: KC_HOSTNAME
+              value: http://keycloak.platform.svc.cluster.local:8080
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_HTTPS_CERTIFICATE_FILE
+              value: /opt/keycloak/tls/tls.crt
+            - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+              value: /opt/keycloak/tls/tls.key
+            - name: KC_HTTPS_PORT
+              value: "8443"
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: https
+              containerPort: 8443
+            - name: management
+              containerPort: 9000
+          volumeMounts:
+            - name: tls
+              mountPath: /opt/keycloak/tls
+              readOnly: true
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          startupProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /health/started
+              port: 9000
+            periodSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /health/ready
+              port: 9000
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 512Mi
+            limits:
+              memory: 1536Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tls
+          secret:
+            secretName: keycloak-tls
+            defaultMode: 0440
+        - name: realm
+          secret:
+            secretName: keycloak-realm

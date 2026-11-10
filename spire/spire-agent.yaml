@@ -1,0 +1,228 @@
+# SPIRE Agent, one per node. It attests each workload by namespace and
+# ServiceAccount and serves the Workload API on a socket in a host directory.
+#
+# The workloads do not mount that host directory. Two more containers in this
+# pod run the SPIFFE CSI driver, which mounts the socket directory read-only
+# into every pod that asks for a `csi.spiffe.io` volume; the workloads see it at
+# /run/spire/sockets/agent.sock. So only this namespace needs host access, and
+# the namespaces of the workloads can forbid host paths altogether.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-agent
+  namespace: spire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spire-agent
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "nodes/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spire-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spire-agent
+subjects:
+  - kind: ServiceAccount
+    name: spire-agent
+    namespace: spire
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-agent-config
+  namespace: spire
+data:
+  agent.conf: |
+    agent {
+        trust_domain = "tvm.local"
+        server_address = "spire-server.spire.svc.cluster.local"
+        server_port = "8081"
+        data_dir = "/run/spire/data"
+        log_level = "INFO"
+        socket_path = "/run/spire/sockets/agent.sock"
+        trust_bundle_path = "/run/spire/bundle/bundle.crt"
+    }
+    health_checks {
+        listener_enabled = true
+        bind_address = "127.0.0.1"
+        bind_port = "9981"
+        live_path = "/live"
+        ready_path = "/ready"
+    }
+    plugins {
+        NodeAttestor "k8s_psat" {
+            plugin_data {
+                cluster = "mcp-tenants"
+                token_path = "/var/run/secrets/tokens/spire-agent"
+            }
+        }
+        KeyManager "memory" {
+            plugin_data {}
+        }
+        WorkloadAttestor "k8s" {
+            plugin_data {
+                skip_kubelet_verification = true
+            }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent
+  namespace: spire
+spec:
+  selector:
+    matchLabels:
+      app: spire-agent
+  template:
+    metadata:
+      labels:
+        app: spire-agent
+    spec:
+      serviceAccountName: spire-agent
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: spire-agent
+          image: ghcr.io/spiffe/spire-agent:1.16.0
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/run/spire/config/agent.conf"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: bundle
+              mountPath: /run/spire/bundle
+              readOnly: true
+            - name: socket
+              mountPath: /run/spire/sockets
+            - name: token
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+            - name: data
+              mountPath: /run/spire/data
+          livenessProbe:
+            httpGet:
+              host: 127.0.0.1
+              path: /live
+              port: 9981
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              host: 127.0.0.1
+              path: /ready
+              port: 9981
+            initialDelaySeconds: 10
+            periodSeconds: 10
+        # The CSI driver: mounts the socket directory into the workloads' pods.
+        # It needs `privileged` to propagate those mounts to the kubelet.
+        - name: spiffe-csi-driver
+          image: ghcr.io/spiffe/spiffe-csi-driver:0.3.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -workload-api-socket-dir=/spire-agent-socket
+            - -csi-socket-path=/spiffe-csi/csi.sock
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: socket
+              mountPath: /spire-agent-socket
+              readOnly: true
+            - name: csi-socket
+              mountPath: /spiffe-csi
+            - name: kubelet-pods
+              mountPath: /var/lib/kubelet/pods
+              mountPropagation: Bidirectional
+        # Registers the driver with the kubelet of this node.
+        - name: node-driver-registrar
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -csi-address=/spiffe-csi/csi.sock
+            - -kubelet-registration-path=/var/lib/kubelet/plugins/csi.spiffe.io/csi.sock
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: csi-socket
+              mountPath: /spiffe-csi
+            - name: kubelet-registration
+              mountPath: /registration
+      volumes:
+        - name: csi-socket
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi.spiffe.io
+            type: DirectoryOrCreate
+        - name: kubelet-pods
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
+        - name: kubelet-registration
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+        - name: config
+          configMap:
+            name: spire-agent-config
+        - name: bundle
+          configMap:
+            name: spire-bundle
+        - name: socket
+          hostPath:
+            path: /run/spire/agent-sockets
+            type: DirectoryOrCreate
+        - name: token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: spire-agent
+                  audience: spire-server
+                  expirationSeconds: 600
+        - name: data
+          emptyDir: {}
+---
+# The driver the workloads name in their volumes. Ephemeral: the volume lives
+# and dies with the pod, and holds nothing but the mounted socket directory.
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.spiffe.io
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  fsGroupPolicy: None
+  volumeLifecycleModes:
+    - Ephemeral

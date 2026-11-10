@@ -1,0 +1,67 @@
+{
+  "realm": "tvm",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 300,
+  "clients": [
+    {
+      "clientId": "mcp-client",
+      "publicClient": false,
+      "secret": "__CLIENT_SECRET__",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "attributes": {
+        "access.token.signed.response.alg": "RS256"
+      },
+      "protocolMappers": [
+        {
+          "name": "scope-group",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "scope_group",
+            "claim.name": "scope_group",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "mcp-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "https://mcp-gateway.platform.svc.cluster.local:8443/mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@tenant1.example",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Tenant1",
+      "attributes": { "scope_group": ["tenant1"] },
+      "credentials": [{ "type": "password", "value": "__USER_PASSWORD__", "temporary": false }]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@tenant2.example",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Tenant2",
+      "attributes": { "scope_group": ["tenant2"] },
+      "credentials": [{ "type": "password", "value": "__USER_PASSWORD__", "temporary": false }]
+    }
+  ]
+}

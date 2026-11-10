@@ -1,0 +1,81 @@
+# Calico writes a ServiceAccount token valid for 24 hours into each node's CNI
+# kubeconfig when calico-node starts. A cluster that runs longer than that stops
+# scheduling pods. Restarting calico-node every 12 hours writes a fresh token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cni-token-renewer
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cni-token-renewer
+  namespace: kube-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["calico-node"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cni-token-renewer
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cni-token-renewer
+subjects:
+  - kind: ServiceAccount
+    name: cni-token-renewer
+    namespace: kube-system
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cni-token-renewer
+  namespace: kube-system
+spec:
+  schedule: "0 */12 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: cni-token-renewer
+          restartPolicy: OnFailure
+          hostNetwork: true
+          dnsPolicy: Default
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: renewer
+              image: registry.k8s.io/kubectl:v1.37.2
+              imagePullPolicy: IfNotPresent
+              args: ["-n", "kube-system", "rollout", "restart", "daemonset/calico-node"]
+              env:
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

@@ -1,0 +1,346 @@
+# Who may open a connection to whom. Applied last, after every component exists.
+#
+# `platform`, `interceptor` and `agents` are closed in both directions: a pod
+# there may open only the connections listed here, and accept only those. So a
+# component that is taken over cannot send what it sees anywhere else. This
+# matters most for the MCP server, which runs every tool call with the
+# credential of that call: it reaches PostgreSQL and OpenBao and nothing more.
+#
+#   agent        -> gateway
+#   gateway      -> Interceptor, MCP server, the model (Ollama on the host),
+#                   its controller
+#   Interceptor  -> OpenBao, Keycloak (the signing keys)
+#   MCP server   -> OpenBao (to exchange the wrapping token), PostgreSQL
+#   OpenBao      -> PostgreSQL
+#   controller   -> Keycloak (it fetches the signing keys for the gateway)
+#
+# `spire` is not closed: the SPIRE Agents use the host network, which a
+# NetworkPolicy cannot select, and the Server calls the Kubernetes API. The
+# Server accepts connections on its one port.
+
+# --- agents ------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: agents
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-egress
+  namespace: agents
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-gateway
+      ports:
+        - {protocol: TCP, port: 8443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-ingress-from-kagent
+  namespace: agents
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kagent
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# --- interceptor -------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: interceptor
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# The Interceptor: from the gateway only; to OpenBao and Keycloak only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: interceptor
+  namespace: interceptor
+spec:
+  podSelector:
+    matchLabels:
+      app: interceptor
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-gateway
+      ports:
+        - {protocol: TCP, port: 9002}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+          podSelector:
+            matchLabels:
+              app: openbao
+      ports:
+        - {protocol: TCP, port: 8200}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+          podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - {protocol: TCP, port: 8443}
+---
+# --- platform ----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: platform
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Every pod may resolve names.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dns
+  namespace: platform
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# The gateway: from the agent only. To the Interceptor, the MCP server, the
+# model on the host, and its own controller (configuration, over xDS).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-gateway
+  namespace: platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-gateway
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agents
+      ports:
+        - {protocol: TCP, port: 8443}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: interceptor
+          podSelector:
+            matchLabels:
+              app: interceptor
+      ports:
+        - {protocol: TCP, port: 9002}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: mcp-server
+      ports:
+        - {protocol: TCP, port: 8443}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentgateway-system
+      ports:
+        - {protocol: TCP, port: 9978}
+    # Ollama, at Docker Desktop's host address (agentgateway/gateway.yaml).
+    - to:
+        - ipBlock:
+            cidr: 192.168.65.254/32
+      ports:
+        - {protocol: TCP, port: 11434}
+---
+# The MCP server: from the gateway only. To OpenBao, to exchange the wrapping
+# token, and to PostgreSQL, to run the tool.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-server
+  namespace: platform
+spec:
+  podSelector:
+    matchLabels:
+      app: mcp-server
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-gateway
+      ports:
+        - {protocol: TCP, port: 8443}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: openbao
+      ports:
+        - {protocol: TCP, port: 8200}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+# OpenBao: from the Interceptor, which asks for a wrapped credential, and from
+# the MCP server, which exchanges the wrapping token for it. To PostgreSQL, to
+# create and drop the roles.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbao
+  namespace: platform
+spec:
+  podSelector:
+    matchLabels:
+      app: openbao
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: interceptor
+          podSelector:
+            matchLabels:
+              app: interceptor
+        - podSelector:
+            matchLabels:
+              app: mcp-server
+      ports:
+        - {protocol: TCP, port: 8200}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+# PostgreSQL: from OpenBao and the MCP server. It opens no connection.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  namespace: platform
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: openbao
+        - podSelector:
+            matchLabels:
+              app: mcp-server
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+# Keycloak: its signing keys are fetched by the Interceptor and by the gateway's
+# controller. It opens no connection. (demo.sh reaches it through kubectl
+# port-forward, which a NetworkPolicy does not govern.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak
+  namespace: platform
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: interceptor
+          podSelector:
+            matchLabels:
+              app: interceptor
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentgateway-system
+      ports:
+        - {protocol: TCP, port: 8443}
+---
+# --- spire -------------------------------------------------------------------
+# The SPIRE Server: its one port, from the Agents (host network).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: spire-server
+  namespace: spire
+spec:
+  podSelector:
+    matchLabels:
+      app: spire-server
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8081}

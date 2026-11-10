@@ -1,0 +1,344 @@
+# Agentgateway: every request of the agent goes through here, both to the model
+# (Ollama on the host) and to the MCP server.
+#
+#   /mcp                   -> the MCP server, after the Interceptor guardrail
+#   /v1/chat/completions   -> Ollama
+#
+# The listener serves the gateway's SPIRE SVID and accepts only clients that
+# present the agent's SPIFFE ID. Both routes require a valid Keycloak token
+# whose audience is the MCP endpoint.
+
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: mcp-gateway
+  namespace: platform
+spec:
+  image:
+    registry: cr.agentgateway.dev
+    repository: agentgateway
+    digest: sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
+  # The SPIRE socket comes from the SPIFFE CSI driver, not from a host path.
+  spiffe:
+    source:
+      csi: {}
+      socketName: agent.sock
+  # What the `restricted` Pod Security level asks of the pod and the generated
+  # Deployment does not set.
+  deployment:
+    spec:
+      template:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+  service:
+    spec:
+      type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mcp-gateway
+  namespace: platform
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: mcp-gateway
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 8443
+      allowedRoutes:
+        namespaces:
+          from: Same
+      tls:
+        mode: Terminate
+        options:
+          agentgateway.dev/tls-certificate-source: SPIFFE
+---
+# Only the agent's workload may use the gateway, whatever token it presents.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: agent-only
+  namespace: platform
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: mcp-gateway
+  traffic:
+    authorization:
+      action: Allow
+      policy:
+        matchExpressions:
+          - 'source.spiffeId == "spiffe://tvm.local/workload/agent"'
+---
+# ---------------------------------------------------------------------------
+# The MCP route
+# ---------------------------------------------------------------------------
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: mcp
+  namespace: platform
+spec:
+  mcp:
+    targets:
+      - name: documents
+        static:
+          host: mcp-server.platform.svc.cluster.local
+          port: 8443
+          path: /mcp
+          protocol: StreamableHTTP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp
+  namespace: platform
+spec:
+  parentRefs:
+    - name: mcp-gateway
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
+        - path:
+            type: Exact
+            value: /.well-known/oauth-protected-resource/mcp
+      # Removes every copy of the credential header the client sent, on every
+      # MCP method, before anything else runs. The guardrail sets the header
+      # only on tools/call, so without this a forged header sent with
+      # `initialize` would reach the MCP server.
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-tvm-credential
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: mcp
+---
+# The token is checked against the Keycloak keys, and its audience must be this
+# MCP endpoint, so a token issued for another service is refused.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-jwt
+  namespace: platform
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: mcp
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      preserveToken: true
+      mcp:
+        provider: Keycloak
+        resourceMetadata:
+          resource: https://mcp-gateway.platform.svc.cluster.local:8443/mcp
+          authorization_servers:
+            - http://keycloak.platform.svc.cluster.local:8080/realms/tvm
+          bearer_methods_supported:
+            - header
+      providers:
+        - issuer: http://keycloak.platform.svc.cluster.local:8080/realms/tvm
+          audiences:
+            - https://mcp-gateway.platform.svc.cluster.local:8443/mcp
+          jwks:
+            remote:
+              backendRef:
+                kind: Service
+                name: keycloak
+                port: 8443
+              jwksPath: /realms/tvm/protocol/openid-connect/certs
+              cacheDuration: 5m
+---
+# The guardrail. Every tools/call goes to the Interceptor before the MCP server;
+# if the Interceptor does not answer, the call is refused (FailClosed). The
+# user's token is removed from everything forwarded to the MCP server.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-backend
+  namespace: platform
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: mcp
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      verifySubjectAltNames:
+        - spiffe://tvm.local/platform/mcp-server
+    transformation:
+      request:
+        remove:
+          - authorization
+    mcp:
+      guardrails:
+        processors:
+          - remote:
+              backendRef:
+                name: interceptor
+                namespace: interceptor
+                port: 9002
+              failureMode: FailClosed
+              allowedRequestHeaders:
+                - authorization
+              metadata:
+                agent_spiffe_id: source.spiffeId
+            methods:
+              tools/call: Request
+---
+# The Interceptor is in its own namespace. This grant, made in that namespace,
+# is what lets the guardrail above name its Service from `platform`.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: guardrail-from-platform
+  namespace: interceptor
+spec:
+  from:
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: platform
+  to:
+    - group: ""
+      kind: Service
+      name: interceptor
+---
+# mTLS to the Interceptor with the gateway's SVID, accepting only its SPIFFE ID.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: interceptor-tls
+  namespace: interceptor
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: interceptor
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      verifySubjectAltNames:
+        - spiffe://tvm.local/platform/interceptor
+      alpnProtocols:
+        - h2
+---
+# TLS to Keycloak for the JWKS.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: keycloak-tls
+  namespace: platform
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: keycloak
+  backend:
+    tls:
+      caCertificateRefs:
+        - kind: ConfigMap
+          name: platform-ca
+      sni: keycloak.platform.svc.cluster.local
+      verifySubjectAltNames:
+        - keycloak.platform.svc.cluster.local
+---
+# ---------------------------------------------------------------------------
+# The model route: Ollama on the host, reached at Docker Desktop's host address.
+# ---------------------------------------------------------------------------
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: model
+  namespace: platform
+spec:
+  ai:
+    provider:
+      openai:
+        model: "qwen2.5:7b"
+      host: 192.168.65.254
+      port: 11434
+      path: /v1/chat/completions
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: model
+  namespace: platform
+spec:
+  parentRefs:
+    - name: mcp-gateway
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/chat/completions
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-tvm-credential
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: model
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: model-jwt
+  namespace: platform
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: model
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+        - issuer: http://keycloak.platform.svc.cluster.local:8080/realms/tvm
+          audiences:
+            - https://mcp-gateway.platform.svc.cluster.local:8443/mcp
+          jwks:
+            remote:
+              backendRef:
+                kind: Service
+                name: keycloak
+                port: 8443
+              jwksPath: /realms/tvm/protocol/openid-connect/certs
+              cacheDuration: 5m
+---
+# The token is not sent to the model.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: model-backend
+  namespace: platform
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: model
+  backend:
+    transformation:
+      request:
+        remove:
+          - authorization

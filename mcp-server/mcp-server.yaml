@@ -1,0 +1,77 @@
+# The MCP server. It has no database credential of its own and no token: with
+# each tools/call the gateway hands it a single-use wrapping token, which it
+# exchanges at OpenBao for the credential of that call. It accepts TLS
+# connections only from the gateway's SPIFFE ID.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-server
+  namespace: platform
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-server
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-server
+  template:
+    metadata:
+      labels:
+        app: mcp-server
+    spec:
+      serviceAccountName: mcp-server
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-server
+          image: mcp-server:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mcp
+              containerPort: 8443
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+          securityContext:
+            runAsUser: 10003
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: spire-socket, mountPath: /run/spire/sockets, readOnly: true}
+            - {name: platform-ca, mountPath: /platform-ca, readOnly: true}
+            - {name: svid, mountPath: /run/mcp-server}
+      volumes:
+        - name: spire-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: platform-ca
+          configMap:
+            name: platform-ca
+        - name: svid
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-server
+  namespace: platform
+spec:
+  selector:
+    app: mcp-server
+  ports:
+    - name: mcp
+      port: 8443

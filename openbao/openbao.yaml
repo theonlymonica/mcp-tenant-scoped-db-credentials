@@ -1,0 +1,191 @@
+# OpenBao, the credential broker. It creates one PostgreSQL role per tool call.
+#
+# The listener asks for a client certificate and verifies it against the SPIRE
+# bundle, so the Interceptor can log in with its SVID (auth method `cert`).
+# A second container unseals OpenBao after a restart with the key that
+# install.sh stored in the Secret openbao-unseal.
+#
+# Every request and response is written to the audit device: which identity
+# logged in, which credential path it read, which wrapping token was exchanged
+# and from where. Secrets in it are HMAC-ed. OpenBao refuses to serve a request
+# it cannot audit, and an audit device can only be declared here, not enabled
+# through the API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao
+  namespace: platform
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-config
+  namespace: platform
+data:
+  config.hcl: |
+    storage "pebbledb" {
+      path = "/openbao/data"
+    }
+    listener "tcp" {
+      address = "0.0.0.0:8200"
+      tls_cert_file = "/openbao/tls/tls.crt"
+      tls_key_file = "/openbao/tls/tls.key"
+      tls_min_version = "tls12"
+      tls_client_ca_file = "/openbao/spire/bundle.crt"
+      tls_require_and_verify_client_cert = false
+    }
+    audit "file" "stdout" {
+      description = "Every request and response, to the container log"
+      options {
+        file_path = "/dev/stdout"
+      }
+    }
+    api_addr = "https://openbao.platform.svc.cluster.local:8200"
+    log_level = "info"
+    ui = false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao
+  namespace: platform
+spec:
+  selector:
+    app: openbao
+  ports:
+    - name: https
+      port: 8200
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao
+  namespace: platform
+spec:
+  serviceName: openbao
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openbao
+  template:
+    metadata:
+      labels:
+        app: openbao
+    spec:
+      serviceAccountName: openbao
+      securityContext:
+        runAsUser: 100
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: openbao
+          image: openbao/openbao:2.7.2
+          imagePullPolicy: IfNotPresent
+          command: ["bao"]
+          args: ["server", "-config=/openbao/config/config.hcl"]
+          ports:
+            - name: https
+              containerPort: 8200
+          env:
+            - name: BAO_ADDR
+              value: "https://127.0.0.1:8200"
+            - name: BAO_CACERT
+              value: "/openbao/ca/ca.crt"
+            - name: SKIP_SETCAP
+              value: "true"
+            # SPIRE SVIDs have no subject common name. With this setting a
+            # local `cert` auth mount accepts them without an entity alias.
+            - name: BAO_DISABLE_LOCAL_AUTH_MOUNT_ENTITIES
+              value: "true"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /openbao/config
+              readOnly: true
+            - name: tls
+              mountPath: /openbao/tls
+              readOnly: true
+            - name: ca
+              mountPath: /openbao/ca
+              readOnly: true
+            - name: spire-bundle
+              mountPath: /openbao/spire
+              readOnly: true
+            - name: data
+              mountPath: /openbao/data
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 5
+        - name: unsealer
+          image: openbao/openbao:2.7.2
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                if [ -s /openbao/unseal/unseal-key ]; then
+                  bao status >/dev/null 2>&1
+                  [ "$?" = "2" ] && bao operator unseal "$(cat /openbao/unseal/unseal-key)" >/dev/null 2>&1
+                fi
+                sleep 5
+              done
+          env:
+            - name: BAO_ADDR
+              value: "https://127.0.0.1:8200"
+            - name: BAO_CACERT
+              value: "/openbao/ca/ca.crt"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: ca
+              mountPath: /openbao/ca
+              readOnly: true
+            - name: unseal
+              mountPath: /openbao/unseal
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: openbao-config
+        - name: tls
+          secret:
+            secretName: openbao-tls
+        - name: ca
+          configMap:
+            name: platform-ca
+        - name: spire-bundle
+          configMap:
+            name: spire-bundle
+        - name: unseal
+          secret:
+            secretName: openbao-unseal
+            optional: true
+            items:
+              - key: unseal-key
+                path: unseal-key
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
